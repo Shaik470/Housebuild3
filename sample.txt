@@ -1,0 +1,11 @@
+Historicall, start a new project, Git automatically created a starting branch named master.The New Default (main): In October 2020, major hosting platforms like GitHub transitioned to using main as the default branch name for all newly created repositories. This shift was made to move away from non-inclusive
+
+
+[ Working Directory ]  ---> (git add)    --->  [ Staging Area (Index) ]
+         ^                                              |
+
+         | (git checkout / switch)                      | (git commit)
+         |                                              v
+[ Remote Repository (GitHub) ] <-- (git push) <--- [ Local Repository (.git) ]
+         |                                              
+         +------------------- (git fetch / pull) -------+
