@@ -107,10 +107,10 @@ stages:
         path: '$(Pipeline.Workspace)/test-results'
       displayName: 'Download Test Results and Coverage'
 
-    # FIXED BLOCK BELOW: Points directly to your verified connection and handles keys properly
-    - task: SonarQubeCloudPrepare@2
+    # 1. Corrected Prepare Task
+    - task: SonarCloudPrepare@2
       inputs:
-        SonarQubeCloud: 'sonarcloud' # Fixed: Matches your exact Azure DevOps service connection name
+        SonarCloud: 'sonarcloud' # Matches your exact service connection name
         organization: 'maheshpasapala'
         scannerMode: 'CLI'
         configMode: 'manual'
@@ -123,42 +123,12 @@ stages:
           sonar.python.coverage.reportPaths=$(Pipeline.Workspace)/test-results/coverage.xml
       displayName: 'Prepare SonarQube Cloud Analysis'
 
-    - task: SonarQubeCloudAnalyze@2
+    # 2. Corrected Analyze Task
+    - task: SonarCloudAnalyze@2
       displayName: 'Run SonarQube Cloud Analysis'
 
-    - task: SonarQubeCloudPublish@2
+    # 3. Corrected Publish Task
+    - task: SonarCloudPublish@2
       inputs:
         pollingTimeoutSec: '300'
       displayName: 'Publish SonarQube Quality Gate'
-
-# ============================================================
-# STAGE 3: START FLASK APPLICATION
-# ============================================================
-- stage: Run_Application
-  displayName: 'Run Flask Application'
-  dependsOn: SonarQube
-  condition: succeeded()
-
-  jobs:
-  - job: StartFlask
-    displayName: 'Start Flask Application'
-
-    steps:
-    - checkout: self
-      displayName: 'Checkout Source Code'
-
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '3.8'
-        addToPath: true
-      displayName: 'Setup Python 3.8'
-
-    - script: |
-        if [ -f requirement.txt ]; then pip install -r requirement.txt; else pip install flask; fi
-      displayName: 'Install Dependencies'
-
-    - script: |
-        python app.py &
-        sleep 10
-        echo "Flask application started successfully"
-      displayName: 'Start Flask Application'
