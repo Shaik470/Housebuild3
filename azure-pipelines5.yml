@@ -1,0 +1,134 @@
+trigger:
+  branches:
+    include:
+      - master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+
+# ============================================================
+# STAGE 1: BUILD AND TEST (Generates Coverage Data)
+# ============================================================
+- stage: Build_Test
+  displayName: 'Build and Run Tests'
+
+  jobs:
+  - job: BuildAndTest
+    displayName: 'Python Build and Unit Tests'
+
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      displayName: 'Checkout Source Code'
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.8'
+        addToPath: true
+      displayName: 'Setup Python 3.8'
+
+    - script: |
+        python -m pip install --upgrade pip
+      displayName: 'Upgrade pip'
+
+    - script: |
+        if [ -f requirement.txt ]; then
+          pip install -r requirement.txt
+        else
+          pip install flask
+        fi
+      displayName: 'Install Dependencies'
+
+    - script: |
+        pip install pytest pytest-html pytest-cov
+      displayName: 'Install Unit Test Dependencies'
+
+    - script: |
+        python -m py_compile app.py || echo "app.py compilation skipped or failed"
+        python -m py_compile house.py || echo "house.py compilation skipped or failed"
+      displayName: 'Validate Python Code'
+
+    - script: |
+        mkdir -p test-results
+      displayName: 'Create Test Result Folder'
+
+    - script: |
+        pytest tests/test_app_50_cases.py \
+          -v \
+          -ra \
+          --junitxml=test-results/junit.xml \
+          --html=test-results/unit-test-report.html \
+          --self-contained-html \
+          --cov=. \
+          --cov-report=xml:test-results/coverage.xml \
+          --cov-report=term
+      displayName: 'Run 50 Unit Tests'
+      continueOnError: true
+
+    - task: PublishTestResults@2
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: 'test-results/junit.xml'
+        testRunTitle: 'House Price Prediction Unit Tests'
+        failTaskOnFailedTests: false
+      displayName: 'Publish Unit Test Results'
+
+    - task: PublishPipelineArtifact@1
+      condition: always()
+      inputs:
+        targetPath: 'test-results'
+        artifact: 'test-results'
+        publishLocation: 'pipeline'
+      displayName: 'Publish Test Results Artifact'
+
+# ============================================================
+# STAGE 2: SONARQUBE CLOUD ANALYSIS (Sends Data to Dashboard)
+# ============================================================
+- stage: SonarQube
+  displayName: 'SonarQube Code Quality Analysis'
+  dependsOn: Build_Test
+  condition: succeededOrFailed()
+
+  jobs:
+  - job: SonarQubeAnalysis
+    displayName: 'SonarQube Cloud Analysis'
+
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      displayName: 'Checkout Source Code'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'test-results'
+        path: '$(Pipeline.Workspace)/test-results'
+      displayName: 'Download Test Results and Coverage'
+
+    # 1. Initialize SonarCloud Scanner Configuration
+    - task: SonarCloudPrepare@3
+      inputs:
+        SonarCloud: 'SonarCloudServiceConnection'
+        organization: 'shaik470'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'Shaik470_Housebuild3'
+        cliProjectName: 'Housebuild3'
+        cliSources: '.'
+        extraProperties: |
+          sonar.exclusions=**/tests/**,**/__pycache__/**,**/.pytest_cache/**
+          sonar.python.version=3.8
+          sonar.python.coverage.reportPaths=$(Pipeline.Workspace)/test-results/coverage.xml
+      displayName: 'Prepare SonarQube Cloud Analysis'
+
+    # 2. Execute Code Scanning & Process coverage.xml
+    - task: SonarCloudAnalyze@3
+      displayName: 'Run SonarQube Cloud Analysis'
+
+    # 3. Pull Quality Gate status back into DevOps
+    - task: SonarCloudPublish@3
+      inputs:
+        pollingTimeoutSec: '300'
+      displayName: 'Publish SonarQube Quality Gate'
