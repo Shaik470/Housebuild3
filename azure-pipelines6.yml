@@ -73,12 +73,21 @@ stages:
 # old code commented and added new code below
 
 #NEW CODE ADDED  here
+    #- script: |
+        #export PYTHONPATH=$(System.DefaultWorkingDirectory)
+        #pytest tests/test_app_50_cases.py -v -ra --junitxml=test-results/junit.xml --html=test-results/unit-test-report.html --self-contained-html --cov=. --cov-report=xml:test-results/coverage.xml --cov-report=term
+      #displayName: 'Run 50 Unit Tests'
+      #continueOnError: true
+# new code till here
+
+# new code 2 - changing the path
+
     - script: |
         export PYTHONPATH=$(System.DefaultWorkingDirectory)
-        pytest tests/test_app_50_cases.py -v -ra --junitxml=test-results/junit.xml --html=test-results/unit-test-report.html --self-contained-html --cov=. --cov-report=xml:test-results/coverage.xml --cov-report=term
+        pytest -v -ra --junitxml=test-results/junit.xml --html=test-results/unit-test-report.html --self-contained-html --cov=. --cov-report=xml:test-results/coverage.xml --cov-report=term
       displayName: 'Run 50 Unit Tests'
       continueOnError: true
-# new code till here
+# new code 2 - till here
 
     - task: PublishTestResults@2
       condition: always()
