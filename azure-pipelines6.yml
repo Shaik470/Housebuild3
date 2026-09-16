@@ -84,7 +84,15 @@ stages:
 
     - script: |
         export PYTHONPATH=$(System.DefaultWorkingDirectory)
-        pytest -v -ra --junitxml=test-results/junit.xml --html=test-results/unit-test-report.html --self-contained-html --cov=. --cov-report=xml:test-results/coverage.xml --cov-report=term
+        pytest test_app_50_cases.py \
+          -v \
+          -ra \
+          --junitxml=test-results/junit.xml \
+          --html=test-results/unit-test-report.html \
+          --self-contained-html \
+          --cov=. \
+          --cov-report=xml:test-results/coverage.xml \
+          --cov-report=term
       displayName: 'Run 50 Unit Tests'
       continueOnError: true
 # new code 2 - till here
@@ -140,7 +148,7 @@ stages:
         cliProjectName: 'Housebuild3'
         cliSources: '.'
         extraProperties: |
-          sonar.exclusions=**/tests/**,**/__pycache__/**,**/.pytest_cache/**
+          sonar.exclusions=**/__pycache__/**,**/.pytest_cache/**
           sonar.python.version=3.8
           sonar.python.coverage.reportPaths=$(Pipeline.Workspace)/test-results/coverage.xml
       displayName: 'Prepare SonarQube Cloud Analysis'
