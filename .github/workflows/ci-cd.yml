@@ -1,0 +1,87 @@
+name: Housebuild CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: housebuild-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+          cache: pip
+          cache-dependency-path: requirement.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirement.txt
+
+      - name: Compile Python files
+        run: python -m py_compile app.py house.py
+
+      - name: Create test report directory
+        run: mkdir -p test-results
+
+      - name: Run tests
+        run: >-
+          python -m pytest test_app_50_cases.py
+          --verbose
+          --junitxml=test-results/junit.xml
+          --html=test-results/unit-test-report.html
+          --self-contained-html
+          --cov=.
+          --cov-report=xml:test-results/coverage.xml
+          --cov-report=term
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: test-results/
+          if-no-files-found: warn
+
+  deliver:
+    name: Package application
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Create delivery package
+        run: |
+          mkdir -p dist/housebuild
+          cp -r app.py house.py model.pkl requirement.txt templates static dist/housebuild/
+          tar -czf "dist/housebuild-${GITHUB_SHA}.tar.gz" -C dist housebuild
+
+      - name: Upload delivery package
+        uses: actions/upload-artifact@v4
+        with:
+          name: housebuild-${{ github.ref_name }}
+          path: dist/housebuild-*.tar.gz
