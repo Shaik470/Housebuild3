@@ -2,209 +2,145 @@ trigger:
   branches:
     include:
       - main
+      - master
+
+pr:
+  branches:
+    include:
+      - main
+      - master
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: ubuntu-latest
+
+variables:
+  imageName: housebuild
+  imageTag: ci
 
 stages:
+  - stage: Build_Test
+    displayName: Build image and run tests
+    jobs:
+      - job: BuildAndTest
+        displayName: Build Docker image and run unit tests
+        steps:
+          - checkout: self
+            fetchDepth: 0
 
-# ============================================================
-# STAGE 1: BUILD AND TEST
-# ============================================================
+          - script: docker build -t $(imageName):$(imageTag) .
+            displayName: Build Docker image
 
-- stage: Build_Test
-  displayName: 'Build and Run Tests'
+          - script: |
+              mkdir -p test-results
+              docker run --rm \
+                -v "$(System.DefaultWorkingDirectory)/test-results:/app/test-results" \
+                $(imageName):$(imageTag) \
+                python -m pytest test_app_50_cases.py \
+                  --verbose \
+                  --junitxml=test-results/junit.xml \
+                  --html=test-results/unit-test-report.html \
+                  --self-contained-html \
+                  --cov=. \
+                  --cov-report=xml:test-results/coverage.xml \
+                  --cov-report=term
+            displayName: Run containerized tests
+            continueOnError: true
 
-  jobs:
-  - job: BuildAndTest
-    displayName: 'Python Build and Unit Tests'
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: test-results/junit.xml
+              testRunTitle: Housebuild container tests
+              failTaskOnFailedTests: false
+            displayName: Publish test results
 
-    steps:
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: test-results
+              artifact: test-results
+              publishLocation: pipeline
+            displayName: Publish test reports
 
-    # 1. Checkout source code
-    - checkout: self
-      fetchDepth: 0
-      displayName: 'Checkout Source Code'
+          - script: |
+              mkdir -p "$(Build.ArtifactStagingDirectory)/docker-image"
+              docker save $(imageName):$(imageTag) \
+                -o "$(Build.ArtifactStagingDirectory)/docker-image/housebuild-image.tar"
+            displayName: Export Docker image
 
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)/docker-image
+              artifact: docker-image
+              publishLocation: pipeline
+            displayName: Publish Docker image artifact
 
-    # 2. Install Python
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '3.8'
-        addToPath: true
-      displayName: 'Setup Python 3.8'
+  - stage: SonarQube
+    displayName: SonarQube code quality analysis
+    dependsOn: Build_Test
+    condition: succeededOrFailed()
+    jobs:
+      - job: SonarQubeAnalysis
+        displayName: Analyze source code
+        steps:
+          - checkout: self
+            fetchDepth: 0
 
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifact: test-results
+              path: $(Pipeline.Workspace)/test-results
+            displayName: Download test reports
 
-    # 3. Upgrade pip
-    - script: |
-        python -m pip install --upgrade pip
-      displayName: 'Upgrade pip'
+          - task: SonarCloudPrepare@4
+            inputs:
+              SonarCloud: SonarQube-House-Project
+              organization: maheshpasapala
+              scannerMode: cli
+              configMode: manual
+              cliProjectKey: House-price-prediction-using-flask
+              cliProjectName: House Price Prediction
+              cliSources: .
+              extraProperties: |
+                sonar.exclusions=**/test_app_50_cases.py,**/__pycache__/**,**/.pytest_cache/**
+                sonar.python.version=3.8
+                sonar.python.coverage.reportPaths=$(Pipeline.Workspace)/test-results/coverage.xml
+            displayName: Prepare SonarCloud analysis
 
+          - task: SonarCloudAnalyze@4
+            inputs:
+              jdkversion: JAVA_HOME_17_X64
+            displayName: Run SonarCloud analysis
 
-    # 4. Install project dependencies
-    - script: |
-        pip install -r requirement.txt
-      displayName: 'Install Dependencies'
+          - task: SonarCloudPublish@4
+            inputs:
+              pollingTimeoutSec: '300'
+            displayName: Publish quality gate
 
+  - stage: Run_Application
+    displayName: Run container smoke test
+    dependsOn: SonarQube
+    condition: succeeded()
+    jobs:
+      - job: StartContainer
+        displayName: Start application with Docker Compose
+        steps:
+          - checkout: self
 
-    # 5. Install test dependencies
-    - script: |
-        pip install pytest
-        pip install pytest-html
-        pip install pytest-cov
-      displayName: 'Install Unit Test Dependencies'
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifact: docker-image
+              path: $(Pipeline.Workspace)/docker-image
+            displayName: Download Docker image
 
+          - script: docker load --input "$(Pipeline.Workspace)/docker-image/housebuild-image.tar"
+            displayName: Load Docker image
 
-    # 6. Validate Python code
-    - script: |
-        python -m py_compile app.py
-        python -m py_compile house.py
-      displayName: 'Validate Python Code'
-
-
-    # 7. Create test result folder
-    - script: |
-        mkdir -p test-results
-      displayName: 'Create Test Result Folder'
-
-
-    # 8. Run 50 unit tests
-    - script: |
-        pytest tests/test_app_50_cases.py \
-          -v \
-          -ra \
-          --junitxml=test-results/junit.xml \
-          --html=test-results/unit-test-report.html \
-          --self-contained-html \
-          --cov=. \
-          --cov-report=xml:test-results/coverage.xml \
-          --cov-report=term
-      displayName: 'Run 50 Unit Tests'
-      continueOnError: true
-
-
-    # 9. Publish JUnit test results
-    - task: PublishTestResults@2
-      condition: always()
-      inputs:
-        testResultsFormat: 'JUnit'
-        testResultsFiles: 'test-results/junit.xml'
-        testRunTitle: 'House Price Prediction Unit Tests'
-        failTaskOnFailedTests: false
-      displayName: 'Publish Unit Test Results'
-
-
-    # 10. Publish test reports + coverage
-    - task: PublishPipelineArtifact@1
-      condition: always()
-      inputs:
-        targetPath: 'test-results'
-        artifact: 'test-results'
-        publishLocation: 'pipeline'
-      displayName: 'Publish Test Results Artifact'
-
-
-# ============================================================
-# STAGE 2: SONARQUBE CLOUD ANALYSIS
-# ============================================================
-
-- stage: SonarQube
-  displayName: 'SonarQube Code Quality Analysis'
-
-  dependsOn: Build_Test
-
-  condition: succeededOrFailed()
-
-  jobs:
-  - job: SonarQubeAnalysis
-    displayName: 'SonarQube Cloud Analysis'
-
-    steps:
-
-    # 1. Checkout source code
-    - checkout: self
-      fetchDepth: 0
-      displayName: 'Checkout Source Code'
-
-
-    # 2. Download test results / coverage
-    - task: DownloadPipelineArtifact@2
-      inputs:
-        artifact: 'test-results'
-        path: '$(Pipeline.Workspace)/test-results'
-      displayName: 'Download Test Results and Coverage'
-
-
-    # 3. Prepare SonarQube Cloud
-    - task: SonarCloudPrepare@4
-      inputs:
-        SonarCloud: 'SonarQube-House-Project'
-        organization: 'maheshpasapala'
-        scannerMode: 'cli'
-        configMode: 'manual'
-        cliProjectKey: 'House-price-prediction-using-flask'
-        cliProjectName: 'House Price Prediction'
-        cliSources: '.'
-        extraProperties: |
-          sonar.exclusions=**/tests/**,**/__pycache__/**,**/.pytest_cache/**
-          sonar.python.version=3.8
-          sonar.python.coverage.reportPaths=$(Pipeline.Workspace)/test-results/coverage.xml
-      displayName: 'Prepare SonarQube Cloud Analysis'
-
-
-    # 4. Run SonarQube analysis
-    - task: SonarCloudAnalyze@4
-      inputs:
-        jdkversion: 'JAVA_HOME_17_X64'
-      displayName: 'Run SonarQube Cloud Analysis'
-
-
-    # 5. Publish Quality Gate
-    - task: SonarCloudPublish@4
-      inputs:
-        pollingTimeoutSec: '300'
-      displayName: 'Publish SonarQube Quality Gate'
-
-
-# ============================================================
-# STAGE 3: START FLASK APPLICATION
-# ============================================================
-
-- stage: Run_Application
-  displayName: 'Run Flask Application'
-
-  dependsOn: SonarQube
-
-  condition: succeeded()
-
-  jobs:
-  - job: StartFlask
-    displayName: 'Start Flask Application'
-
-    steps:
-
-    # 1. Checkout source code
-    - checkout: self
-      displayName: 'Checkout Source Code'
-
-
-    # 2. Install Python
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '3.8'
-        addToPath: true
-      displayName: 'Setup Python 3.8'
-
-
-    # 3. Install dependencies
-    - script: |
-        pip install -r requirement.txt
-      displayName: 'Install Dependencies'
-
-
-    # 4. Start Flask
-    - script: |
-        python app.py &
-        sleep 10
-        echo "Flask application started successfully"
-      displayName: 'Start Flask Application'
+          - script: |
+              docker tag $(imageName):$(imageTag) housebuild:local
+              docker compose up -d --no-build
+              trap 'docker compose down' EXIT
+              curl --fail --retry 10 --retry-all-errors --retry-delay 2 http://127.0.0.1:5000/
+              docker compose ps
+            displayName: Start and smoke-test application
